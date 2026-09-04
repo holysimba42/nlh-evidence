@@ -1,17 +1,4 @@
-"""nlh — no-human-in-the-loop credential plane.
-Responsibilities: resolve credential, seal secrets into GitHub Actions,
-prove unattended consumption (dispatch -> self-hosted runner -> hash round-trip),
-fetch/validate the OANDA token.
-
-Subcommands:
-  put NAME [VALUE]   seal value (arg or stdin) into GitHub secret NAME
-  rotate             fresh BUF_TEST_SECRET -> put -> dispatch -> sha256 round-trip
-  verify             re-dispatch -> log sha must match evidence/last_rotate.json
-  oanda-fetch        stdin: agent-browser `read` DOM text -> keyring -> GitHub -> validate
-  oanda-validate     keyring OANDA token -> GET /v3/accounts
-  device-init        start OAuth device flow (RFC 8628): prints user code + URL
-  device-poll        poll once (bounded 25-min window) -> keyring + scopes + GET /user proof
-"""
+"""nlh — no-human-in-the-loop credential plane (see USAGE for commands)."""
 import base64, hashlib, io, json, pathlib, re, subprocess, sys, time, urllib.request
 import urllib.parse
 import zipfile
@@ -34,22 +21,16 @@ DEVICE_STATE = pathlib.Path.home() / ".nlh" / "device_state.json"
 DEVICE_EVID = EVID / "device_flow.json"
 
 
-def resolve_token(plane):
-    """Single owner of credential resolution.
-    gh plane: the gh CLI's own credential store resolves until a device-flow
-    token is minted (K1); device-poll becomes primary then.
-    oanda plane: keyring entry only — absence must surface, never mask."""
-    if plane == "oanda":
-        tok = keyring.get_password(SERVICE, "oanda_practice_token")
-        assert tok, "no OANDA token in keyring"
-        return tok
-    raise ValueError(f"unknown plane: {plane}")
+def oanda_token():
+    tok = keyring.get_password(SERVICE, "oanda_practice_token")
+    assert tok, "no OANDA token in keyring"
+    return tok
 
 
-def gh(*args, binary=False):
+def gh(*args):
     r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=300)
     assert r.returncode == 0, f"gh {args[:3]} failed: {r.stderr[:200]}"
-    return r.stdout if binary else r.stdout.decode()
+    return r.stdout.decode()
 
 
 def seal_into_github(name, value):
@@ -108,7 +89,6 @@ def cmd_rotate():
         run = dispatch_and_wait()
         cloud_sha = cloud_secret_sha(run["id"])
     except Exception as e:
-        EVID.mkdir(exist_ok=True)
         ROT_STATE.write_text(json.dumps({
             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "value_sha256": local_sha, "rotate_result": "FAIL",
@@ -119,12 +99,11 @@ def cmd_rotate():
 
     o_st, o_n = 0, 0
     try:
-        o_st, o_n = oanda_accounts(resolve_token("oanda"))
+        o_st, o_n = oanda_accounts(oanda_token())
     except AssertionError:
         pass                                   # no token == drift, recorded below
     oanda_ok = o_st == 200 and o_n > 0
 
-    EVID.mkdir(exist_ok=True)
     ROT_STATE.write_text(json.dumps({
         "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "value_sha256": local_sha, "run_id": run["id"],
@@ -188,7 +167,7 @@ def cmd_oanda_fetch():
 
 
 def cmd_oanda_validate():
-    st, n = oanda_accounts(resolve_token("oanda"))
+    st, n = oanda_accounts(oanda_token())
     print(json.dumps({"result": "PASS" if st == 200 and n else "FAIL",
                       "http_status": st, "accounts_found": n}))
     if st != 200 or not n:
@@ -224,14 +203,14 @@ def cmd_device_poll():
     d = json.loads(DEVICE_STATE.read_text())
     deadline = d["initiated_at"] + 1500
     interval = d["interval"]
-    tok = None
+    tok = None; scope_raw = ""
     while time.time() < deadline:
         time.sleep(min(interval, max(1, deadline - time.time())))
         r = _device_post("https://github.com/login/oauth/access_token",
                          {"client_id": CLIENT_ID, "device_code": d["device_code"],
                           "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
         if "access_token" in r:
-            tok = r["access_token"]; break
+            tok = r["access_token"]; scope_raw = r.get("scope", ""); break
         err = r.get("error")
         if err == "authorization_pending":
             continue
@@ -251,13 +230,11 @@ def cmd_device_poll():
         "User-Agent": "nlh-evidence"})
     with urllib.request.urlopen(req, timeout=30) as r:
         user = json.loads(r.read().decode())
-    scopes = [s for s in r.get("scope", "").split(",") if s]   # from token response
+    scopes = [s for s in scope_raw.split(",") if s]
     keyring.set_password(SERVICE, "gh_device_token", tok)   # distinct entry
-    EVID.mkdir(exist_ok=True)
     DEVICE_EVID.write_text(json.dumps({
         "result": "PASS", "login": user["login"], "user_id": user["id"],
-        "get_user_status": 200, "scopes": scopes,
-        "token_prefix": tok[:4] + "****",
+        "scopes": scopes,
         "token_sha256_prefix": hashlib.sha256(tok.encode()).hexdigest()[:12],
         "stored": "OS keyring (buf_nlh/gh_device_token)",
         "token_printed_anywhere": False}, indent=2))
