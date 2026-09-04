@@ -24,7 +24,8 @@ Every `rotate` (also the 06:00 scheduled one) runs BOTH checks and writes
 - exit 0 — all green
 - exit 3 — hash drift (runner-observed secret ≠ sealed value)
 - exit 4 — OANDA drift (`oanda_http_status != 200`, or no token/zero accounts)
-- exit 5 — infrastructure failure (dispatch/log); state records the error
+- exit 5 — infrastructure failure (dispatch/wait/log, incl. run never
+  completing); state records the error
 
 Failures are recorded in state BEFORE exit — no silent rot. Historical
 fail-loud proofs: the real OANDA 401 drift episode is visible in the

@@ -51,7 +51,7 @@ def dispatch_and_wait():
         r0 = runs["workflow_runs"][0]
         if r0["status"] == "completed":
             return r0
-    raise SystemExit("run never completed")
+    raise TimeoutError("run never completed")
 
 
 def cloud_secret_sha(run_id):
