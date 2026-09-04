@@ -1,0 +1,22 @@
+name: k5-unattended-secret-consumer
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"   # daily unattended fire, no human
+permissions:
+  contents: read
+jobs:
+  consume-secret:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consume BUF_TEST_SECRET (proof it was fetched/rotated programmatically)
+        env:
+          BUF_TEST_SECRET: ${{ secrets.BUF_TEST_SECRET }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${GITHUB_RUN_ID}"
+          LEN="${#BUF_TEST_SECRET}"
+          HASH="$(printf '%s' "$BUF_TEST_SECRET" | sha256sum | cut -d' ' -f1)"
+          if [ "$LEN" -eq 0 ]; then echo "::error::secret missing"; exit 1; fi
+          echo "run_id=$RUN_ID secret_len=$LEN secret_sha256=$HASH"
+          echo "K5_SECRET_CONSUMED_OK run_id=$RUN_ID len=$LEN sha=$HASH"
