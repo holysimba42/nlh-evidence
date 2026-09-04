@@ -45,6 +45,41 @@ if (-not (Get-Service -Name "actions.runner.*" -ErrorAction SilentlyContinue)) {
 }
 Pop-Location
 
+# 3b) runner-owner: boot-triggered hidden task keeps the listener alive across
+# reboots (and starts it on demand via schtasks //Run). Restart-on-failure,
+# no time limit. Registers without elevation for the current user; degrades
+# with a warning otherwise, same as step 3.
+$gitUsrBin = "C:\Program Files\Git\usr\bin"
+if (-not (Test-Path (Join-Path $gitUsrBin "bash.exe"))) { throw "git usr bin not found at $gitUsrBin - install Git for Windows or fix the path" }
+# Pin Git-bash-first PATH: a clean task environment resolves bash.exe to WSL,
+# which mangles Windows step-script paths (C:\nlh_work\... -> C:nlh_work_...) and
+# breaks every step (seen live: '::error::secret missing' behind 'No such file').
+$runCmd = "/c set PATH=$gitUsrBin;%PATH%&& `"$RunnerDir\run.cmd`""
+if (-not (Get-ScheduledTask -TaskName "nlh-runner" -ErrorAction SilentlyContinue)) {
+    $rAct = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $runCmd -WorkingDirectory $RunnerDir
+    $rSet = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+    try {   # boot trigger = survives reboot with no login; needs elevation
+        $rTrg = New-ScheduledTaskTrigger -AtStartup
+        Register-ScheduledTask -TaskName "nlh-runner" -Action $rAct -Trigger $rTrg -Settings $rSet -ErrorAction Stop | Out-Null
+    } catch {   # non-admin: degrade to this user's logon trigger (survives reboot once you log in)
+        try {
+            $rTrg = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+            Register-ScheduledTask -TaskName "nlh-runner" -Action $rAct -Trigger $rTrg -Settings $rSet -ErrorAction Stop | Out-Null
+            Write-Warning "nlh-runner registered with logon trigger (elevate setup.ps1 for a true boot trigger)"
+        } catch {
+            Write-Warning "nlh-runner not registered (run setup.ps1 elevated to enable): $_"
+        }
+    }
+}
+
+# Start the listener through its owner task if nothing is running (fresh
+# bootstrap, or the process died) — otherwise the smoke test dispatches into a queue.
+if (-not (Get-Process -Name "Runner.Listener" -ErrorAction SilentlyContinue)) {
+    Start-ScheduledTask -TaskName "nlh-runner"
+    Start-Sleep -Seconds 20
+}
+
 # 4) daily 06:00 rotation task (bypasses GitHub-hosted billing lock)
 $script = Join-Path $PSScriptRoot "scripts\nlh.py"
 $act = New-ScheduledTaskAction -Execute "python" -Argument "`"$script`" rotate"

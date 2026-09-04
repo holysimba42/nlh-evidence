@@ -13,7 +13,8 @@ $0 no-human-in-the-loop credential automation, proven empirically.
 - `scripts/k4_dom.py` — proves headless DOM navigate/extract/type/click.
 - `.github/workflows/k5.yml` — consumes `BUF_TEST_SECRET` on the
   self-hosted runner (`nlh-local` label) and logs its sha256.
-- `setup.ps1` — idempotent bootstrap: deps, runner registration, daily task.
+- `setup.ps1` — idempotent bootstrap: deps, runner registration, the
+  `nlh-runner` owner task, daily task.
 
 ## Drift-detection contract
 Every `rotate` (also the 06:00 scheduled one) runs BOTH checks and writes
@@ -39,6 +40,17 @@ dispatch) fired the full chain: task fired 05:53:00, workflow run
 production task `nlh-daily-rotate` fires daily at 06:00 with the identical
 command. GitHub-hosted runners are blocked by an account-level billing
 lock (`evidence/platform_gate/`); the self-hosted runner bypasses it.
+
+## Runner ownership & reliability
+The runner listener (JACK) is owned by the `nlh-runner` Windows scheduled
+task (logon/boot-triggered, hidden, restart-on-failure, PATH pinned to
+Git-bash-first so steps don't hit WSL bash). Start it with
+`schtasks //Run /TN "nlh-runner"`; runner logs live in `../_runner/_diag/`
+(the old `evidence/runner_console.log` is superseded and deleted).
+Reliability record: `evidence/soak_burnin.json` — 4/4 scheduler-fired
+soak successes in ~27 min plus a forced runner-outage demo (job queued
+while the listener was dead, chain fail-recorded exit 5, completed on
+restart).
 
 ## Known blocks (honest state)
 - **K1 device-flow mint**: implemented (`nlh device-init && nlh
