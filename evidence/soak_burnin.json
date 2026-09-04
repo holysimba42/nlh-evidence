@@ -1,0 +1,69 @@
+{
+  "purpose": "Soak burn-in: 4 consecutive production-chain fires via the OS task scheduler (schtasks //Run nlh-daily-rotate), plus a runner-outage recovery demo mid-soak. No secrets; run IDs and timestamps only.",
+  "date": "2026-09-04",
+  "method": "Each fire: schtasks //Run -> scheduled task executes scripts/nlh.py rotate (seal -> dispatch -> self-hosted runner consumes -> sha round-trip -> OANDA drift check -> state write). Post-fire checks from cloud API + last_rotate.json. Verification code never dispatched runs outside the chain.",
+  "fires": [
+    {
+      "fire": 1,
+      "fired_at_local": "06:42:45",
+      "run_id": 33879594724,
+      "run_created_utc": "2026-09-04T13:42:49Z",
+      "conclusion": "success",
+      "state_rotate_result": "PASS",
+      "sha_round_trip": true,
+      "oanda_http_status": 200,
+      "oanda_result": "PASS"
+    },
+    {
+      "fire": 2,
+      "fired_at_local": "06:54:53",
+      "run_id": 33880712606,
+      "run_created_utc": "2026-09-04T13:54:57Z",
+      "conclusion": "success",
+      "state_rotate_result": "PASS",
+      "sha_round_trip": true,
+      "oanda_http_status": 200,
+      "oanda_result": "PASS"
+    },
+    {
+      "fire": 3,
+      "scenario": "runner-outage recovery demo",
+      "runner_killed_at_local": "06:57:55",
+      "fired_at_local": "06:58:02",
+      "run_id": 33881007941,
+      "run_created_utc": "2026-09-04T13:58:05Z",
+      "queued_with_runner_down": true,
+      "rotate_wait_timed_out_utc": "2026-09-04T14:02:39Z",
+      "timeout_state_written": {
+        "rotate_result": "FAIL",
+        "error": "infra: run never completed",
+        "exit_code": 5,
+        "silent_rot": false
+      },
+      "runner_relaunched_utc": "2026-09-04T14:03:39Z",
+      "queued_job_picked_utc": "2026-09-04T14:03:41Z",
+      "run_concluded_utc": "2026-09-04T14:03:46Z",
+      "final_conclusion": "success",
+      "recovery": "queued job survived runner outage and completed on runner restart; chain failure was state-recorded per drift contract"
+    },
+    {
+      "fire": 4,
+      "fired_at_local": "07:09:34",
+      "run_id": 33882120069,
+      "run_created_utc": "2026-09-04T14:09:38Z",
+      "conclusion": "success",
+      "state_rotate_result": "PASS",
+      "sha_round_trip": true,
+      "oanda_http_status": 200,
+      "oanda_result": "PASS"
+    }
+  ],
+  "summary": {
+    "fires": 4,
+    "successes": 4,
+    "failures": 0,
+    "outage_recovery_demos": 1,
+    "scheduler_attributed": "every run created only by the scheduled task's own dispatch; no manual/agent dispatch outside the chain",
+    "observed_reliability": "4/4 chain successes across ~27 minutes; 1/1 queued-job recovery after forced runner outage"
+  }
+}
