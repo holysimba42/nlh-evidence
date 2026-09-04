@@ -5,9 +5,12 @@ on:
     - cron: "0 6 * * *"   # daily unattended fire, no human
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 jobs:
   consume-secret:
-    runs-on: ubuntu-latest
+    runs-on: nlh-local
     steps:
       - name: Consume BUF_TEST_SECRET (proof it was fetched/rotated programmatically)
         env:
