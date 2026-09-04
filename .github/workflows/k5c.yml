@@ -1,0 +1,9 @@
+name: k5c-ubuntu-echo-probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pure echo no secret
+        run: echo "K5C_ECHO_OK"
