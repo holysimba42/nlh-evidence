@@ -3,9 +3,9 @@
 $0 no-human-in-the-loop credential automation, proven empirically.
 
 ## Layout
-- `scripts/nlh.py` — the credential plane; `resolve_token()` is the single
-  owner of credential resolution (gh plane: keyring device-flow token
-  primary, gh CLI store fallback; oanda plane: keyring entry).
+- `scripts/nlh.py` — the credential plane; `oanda_token()` resolves the
+  OANDA credential (keyring only — absence surfaces as exit 4, never
+  masked); gh calls use the gh CLI's own credential store.
   Commands: `put` / `rotate` / `verify` / `oanda-fetch` / `oanda-validate` /
   `device-init` / `device-poll`.
 - `scripts/k3_totp_session.py` — proves unattended password+TOTP login,
@@ -24,6 +24,7 @@ Every `rotate` (also the 06:00 scheduled one) runs BOTH checks and writes
 - exit 0 — all green
 - exit 3 — hash drift (runner-observed secret ≠ sealed value)
 - exit 4 — OANDA drift (`oanda_http_status != 200`, or no token/zero accounts)
+- exit 5 — infrastructure failure (dispatch/log); state records the error
 
 Failures are recorded in state BEFORE exit — no silent rot. Historical
 fail-loud proofs: the real OANDA 401 drift episode is visible in the
@@ -43,8 +44,7 @@ lock (`evidence/platform_gate/`); the self-hosted runner bypasses it.
   device-poll`) and fail-loud-proven (RFC 8628 expiry/slow-down exits),
   but the final mint needs ONE human click at github.com/login/device.
   Four windows expired unclicked; no token was minted. gh-plane
-  credentials currently come from the pre-existing gh CLI keyring store
-  via `resolve_token()`.
+  credentials currently come from the pre-existing gh CLI keyring store.
 - **OANDA re-auth**: only ever needed if `oanda-validate`/`rotate` reports
   exit 4 (drift). Otherwise the stored token keeps validating 200.
 
