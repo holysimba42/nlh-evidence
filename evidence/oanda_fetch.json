@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "http_status": 200,
+  "accounts_found": 3,
+  "token_sha256_prefix": "3bfdc4617d1a",
+  "stored_in": "OS keyring (buf_nlh/oanda_practice_token)",
+  "printed_plaintext": false
+}

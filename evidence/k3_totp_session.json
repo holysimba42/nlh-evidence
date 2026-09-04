@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "A_login_with_2fa_unattended": true,
+  "B_session_persisted_to_new_context": true,
+  "C_expiry_detected_fail_loud": true,
+  "auth_steps_required": [
+    "password",
+    "TOTP (RFC 6238)"
+  ],
+  "storage_state_file": ".freebuff\\k3_storage_state.json"
+}

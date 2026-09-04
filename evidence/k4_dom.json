@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "navigate": [
+    "github.com/trending",
+    "repo page",
+    "github.com/login"
+  ],
+  "extracted_first_trending_repo": "fmtlib / fmt",
+  "clicked_link_landed_url": "https://github.com/fmtlib/fmt",
+  "repo_page_title": "GitHub - fmtlib/fmt: A modern formatting library \u00b7 GitHub",
+  "typed_and_verified_field": "#login_field",
+  "typed_value_asserted": true,
+  "screenshots": [
+    "evidence/shots/k4_trending.png",
+    "evidence/shots/k4_repo.png",
+    "evidence/shots/k4_login_typed.png"
+  ],
+  "headless": true
+}
