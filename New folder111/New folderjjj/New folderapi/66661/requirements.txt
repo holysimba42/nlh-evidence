@@ -1,0 +1,7 @@
+pandas>=2.0
+numpy>=1.26
+requests>=2.31
+scikit-learn>=1.4
+pydantic-settings>=2.0
+python-dotenv>=1.0
+pytest>=8.0
