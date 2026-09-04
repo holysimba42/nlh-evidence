@@ -12,7 +12,7 @@ Subcommands:
   device-init        start OAuth device flow (RFC 8628): prints user code + URL
   device-poll        poll once (bounded 25-min window) -> keyring + scopes + GET /user proof
 """
-import base64, hashlib, io, json, pathlib, re, subprocess, sys, time, urllib.request
+import base64, hashlib, io, json, os, pathlib, re, subprocess, sys, time, urllib.request
 import urllib.parse
 import zipfile
 
@@ -34,8 +34,38 @@ DEVICE_STATE = pathlib.Path.home() / ".nlh" / "device_state.json"
 DEVICE_EVID = EVID / "device_flow.json"
 
 
+def resolve_token(plane):
+    """Single owner of credential resolution.
+    gh plane: device-flow token (keyring) primary, gh CLI store fallback.
+    oanda plane: keyring entry only — absence must surface, never mask."""
+    if plane == "gh":
+        tok = keyring.get_password(SERVICE, "gh_device_token")
+        if tok:
+            return tok
+        tok = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                             text=True).stdout.strip()
+        assert tok, "no gh credential in keyring or gh store"
+        return tok
+    if plane == "oanda":
+        tok = keyring.get_password(SERVICE, "oanda_practice_token")
+        assert tok, "no OANDA token in keyring"
+        return tok
+    raise ValueError(f"unknown plane: {plane}")
+
+
+_GH_ENV = None
+
+
+def _gh_env():
+    global _GH_ENV
+    if _GH_ENV is None:
+        _GH_ENV = {**os.environ, "GH_TOKEN": resolve_token("gh")}
+    return _GH_ENV
+
+
 def gh(*args, binary=False):
-    r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=300)
+    r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=300,
+                       env=_gh_env())
     assert r.returncode == 0, f"gh {args[:3]} failed: {r.stderr[:200]}"
     return r.stdout if binary else r.stdout.decode()
 
@@ -64,7 +94,7 @@ def dispatch_and_wait():
 def cloud_secret_sha(run_id):
     """sha256 the runner logged for the injected secret, from the run log zip."""
     p = subprocess.run(["gh", "api", f"repos/{REPO}/actions/runs/{run_id}/logs"],
-                       capture_output=True, timeout=300)
+                       capture_output=True, timeout=300, env=_gh_env())
     assert p.returncode == 0 and p.stdout[:2] == b"PK", "log zip fetch failed"
     with zipfile.ZipFile(io.BytesIO(p.stdout)) as z:
         text = "\n".join(z.read(n).decode(errors="replace")
@@ -94,9 +124,10 @@ def cmd_rotate():
     rotate_ok = cloud_sha == local_sha and run["conclusion"] == "success"
 
     o_st, o_n = 0, 0
-    o_tok = keyring.get_password(SERVICE, "oanda_practice_token")
-    if o_tok:
-        o_st, o_n = oanda_accounts(o_tok)
+    try:
+        o_st, o_n = oanda_accounts(resolve_token("oanda"))
+    except AssertionError:
+        pass                                   # no token == drift, recorded below
     oanda_ok = o_st == 200 and o_n > 0
 
     EVID.mkdir(exist_ok=True)
@@ -158,9 +189,7 @@ def cmd_oanda_fetch():
 
 
 def cmd_oanda_validate():
-    tok = keyring.get_password(SERVICE, "oanda_practice_token")
-    assert tok, "no OANDA token in keyring"
-    st, n = oanda_accounts(tok)
+    st, n = oanda_accounts(resolve_token("oanda"))
     print(json.dumps({"result": "PASS" if st == 200 and n else "FAIL",
                       "http_status": st, "accounts_found": n}))
     if st != 200 or not n:
