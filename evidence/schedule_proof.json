@@ -1,0 +1,35 @@
+{
+  "proof": "Windows Task Scheduler (not manual dispatch) fired the unattended chain",
+  "task_name": "nlh-schedule-proof",
+  "task_config": {
+    "trigger": "ONCE at 05:53 local",
+    "action": "python <repo>\\nlh-evidence\\scripts\\nlh.py rotate",
+    "command_identical_to_production_task": true
+  },
+  "fire": {
+    "schtasks_last_run_time": "2026-09-04 05:53:00 local",
+    "schtasks_last_result": 0,
+    "workflow_run_id": 33875046897,
+    "workflow_run_created_utc": "2026-09-04T12:53:04Z",
+    "created_4s_after_fire": true,
+    "attribution": "no GitHub dispatch API calls and no manual nlh.py invocations between task creation and run completion; only read-only queries"
+  },
+  "chain_result": {
+    "conclusion": "success",
+    "rotate_result": "PASS",
+    "sha_roundtrip": "cloud==local",
+    "oanda_result": "PASS",
+    "oanda_http_status": 200,
+    "oanda_accounts": 3,
+    "state_updated_at_utc": "2026-09-04T12:53:19Z",
+    "state_file": "evidence/last_rotate.json"
+  },
+  "production_task_unchanged": {
+    "name": "nlh-daily-rotate",
+    "schedule": "daily 06:00",
+    "status": "Ready",
+    "command": "python <repo>\\nlh-evidence\\scripts\\nlh.py rotate"
+  },
+  "temp_task_deleted_after_proof": true,
+  "secret_values_exposed": false
+}
