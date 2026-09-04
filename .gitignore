@@ -1,3 +1,4 @@
 # mutable per-run state — local only, not proof artifacts
 evidence/last_rotate.json
 evidence/runner_console.log
+__pycache__/
