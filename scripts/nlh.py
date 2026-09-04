@@ -12,7 +12,7 @@ Subcommands:
   device-init        start OAuth device flow (RFC 8628): prints user code + URL
   device-poll        poll once (bounded 25-min window) -> keyring + scopes + GET /user proof
 """
-import base64, hashlib, io, json, os, pathlib, re, subprocess, sys, time, urllib.request
+import base64, hashlib, io, json, pathlib, re, subprocess, sys, time, urllib.request
 import urllib.parse
 import zipfile
 
@@ -36,16 +36,9 @@ DEVICE_EVID = EVID / "device_flow.json"
 
 def resolve_token(plane):
     """Single owner of credential resolution.
-    gh plane: device-flow token (keyring) primary, gh CLI store fallback.
+    gh plane: the gh CLI's own credential store resolves until a device-flow
+    token is minted (K1); device-poll becomes primary then.
     oanda plane: keyring entry only — absence must surface, never mask."""
-    if plane == "gh":
-        tok = keyring.get_password(SERVICE, "gh_device_token")
-        if tok:
-            return tok
-        tok = subprocess.run(["gh", "auth", "token"], capture_output=True,
-                             text=True).stdout.strip()
-        assert tok, "no gh credential in keyring or gh store"
-        return tok
     if plane == "oanda":
         tok = keyring.get_password(SERVICE, "oanda_practice_token")
         assert tok, "no OANDA token in keyring"
@@ -53,19 +46,8 @@ def resolve_token(plane):
     raise ValueError(f"unknown plane: {plane}")
 
 
-_GH_ENV = None
-
-
-def _gh_env():
-    global _GH_ENV
-    if _GH_ENV is None:
-        _GH_ENV = {**os.environ, "GH_TOKEN": resolve_token("gh")}
-    return _GH_ENV
-
-
 def gh(*args, binary=False):
-    r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=300,
-                       env=_gh_env())
+    r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=300)
     assert r.returncode == 0, f"gh {args[:3]} failed: {r.stderr[:200]}"
     return r.stdout if binary else r.stdout.decode()
 
@@ -94,7 +76,7 @@ def dispatch_and_wait():
 def cloud_secret_sha(run_id):
     """sha256 the runner logged for the injected secret, from the run log zip."""
     p = subprocess.run(["gh", "api", f"repos/{REPO}/actions/runs/{run_id}/logs"],
-                       capture_output=True, timeout=300, env=_gh_env())
+                       capture_output=True, timeout=300)
     assert p.returncode == 0 and p.stdout[:2] == b"PK", "log zip fetch failed"
     with zipfile.ZipFile(io.BytesIO(p.stdout)) as z:
         text = "\n".join(z.read(n).decode(errors="replace")
@@ -106,7 +88,9 @@ def cloud_secret_sha(run_id):
 def cmd_put(name, value=None):
     if value is None:
         value = sys.stdin.read().strip()
-    assert value, "no value given"
+    if not value:
+        print("no value given (arg or stdin)", file=sys.stderr)
+        raise SystemExit(2)
     seal_into_github(name, value)
     print(json.dumps({"result": "PASS", "secret": name,
                       "sha256_prefix": hashlib.sha256(value.encode()).hexdigest()[:12]}))
@@ -114,13 +98,23 @@ def cmd_put(name, value=None):
 
 def cmd_rotate():
     """Rotate secret, prove consumption, and drift-check the OANDA token.
-    exit 3 = hash round-trip failure; exit 4 = OANDA drift (dead/rotted token).
-    State (incl. failures) is written BEFORE exiting — never silent rot."""
+    exit 3 = hash round-trip failure; exit 4 = OANDA drift (dead/rotted token);
+    exit 5 = infrastructure failure (dispatch/log). State (incl. failures) is
+    written BEFORE exiting — never silent rot."""
     value = f"NLH-{int(time.time())}"
     seal_into_github(SECRET, value)
     local_sha = hashlib.sha256(value.encode()).hexdigest()
-    run = dispatch_and_wait()
-    cloud_sha = cloud_secret_sha(run["id"])
+    try:
+        run = dispatch_and_wait()
+        cloud_sha = cloud_secret_sha(run["id"])
+    except Exception as e:
+        EVID.mkdir(exist_ok=True)
+        ROT_STATE.write_text(json.dumps({
+            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "value_sha256": local_sha, "rotate_result": "FAIL",
+            "error": f"infra: {e}"}, indent=2))
+        print(json.dumps({"rotate": "FAIL", "stage": "infra", "error": str(e)[:120]}))
+        raise SystemExit(5)
     rotate_ok = cloud_sha == local_sha and run["conclusion"] == "success"
 
     o_st, o_n = 0, 0
@@ -149,6 +143,9 @@ def cmd_rotate():
 
 
 def cmd_verify():
+    if not ROT_STATE.exists():
+        print("no rotate state — run 'rotate' first", file=sys.stderr)
+        raise SystemExit(2)
     last = json.loads(ROT_STATE.read_text())
     run = dispatch_and_wait()
     cloud_sha = cloud_secret_sha(run["id"])
@@ -167,6 +164,8 @@ def oanda_accounts(token):
             return r.status, len(json.loads(r.read().decode()).get("accounts", []))
     except urllib.error.HTTPError as e:
         return e.code, 0
+    except urllib.error.URLError:
+        return 0, 0                              # network down == drift, recorded
 
 
 def cmd_oanda_fetch():
@@ -219,6 +218,9 @@ def cmd_device_init():
 def cmd_device_poll():
     """One bounded pass: poll the token endpoint until granted, denied, or the
     25-minute window closes. exit 2 on terminal errors — no silent hangs."""
+    if not DEVICE_STATE.exists():
+        print("no device flow state — run 'device-init' first", file=sys.stderr)
+        raise SystemExit(2)
     d = json.loads(DEVICE_STATE.read_text())
     deadline = d["initiated_at"] + 1500
     interval = d["interval"]
